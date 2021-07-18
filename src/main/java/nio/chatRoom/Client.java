@@ -4,10 +4,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.SelectableChannel;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.nio.channels.SocketChannel;
+import java.nio.channels.*;
 import java.nio.charset.Charset;
 import java.util.Set;
 
@@ -59,7 +56,10 @@ public class Client {
             }
         } catch (IOException e) {
             e.printStackTrace();
-        } finally {
+        } catch (ClosedSelectorException e) {
+
+        }
+        finally {
             close(selector);
         }
     }
