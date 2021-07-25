@@ -45,6 +45,65 @@ public class Server {
         this.port = port;
         clientHandlerList = new ArrayList<>();
     }
+    // 添加客户端
+    private synchronized void addClient(ClientHandler  clientHandler) {
+        clientHandlerList.add(clientHandler);
+        System.out.println(getClientName(clientHandler.client) + "已经接入连接");
+    }
+
+    // 获取客户端名
+    private String getClientName(AsynchronousSocketChannel client) {
+        int clientPort = -1;
+        try {
+            InetSocketAddress inetSocketAddress = (InetSocketAddress) client.getRemoteAddress();
+            clientPort = inetSocketAddress.getPort();
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return "客户端[" + clientPort + "]";
+    }
+
+    // 准备退出
+    private boolean readyToQuit(String msg) {
+        return QUIT.equals(msg);
+    }
+
+    // 关闭判断资源
+    private void close(Closeable closeable) {
+        if (asynchronousServerSocketChannel != null) {
+            try {
+                asynchronousServerSocketChannel.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    // 从客户端队列中删除对应的客户端并关闭资源
+    private synchronized void removeClient(ClientHandler clientHandler) {
+        clientHandlerList.remove(clientHandler);
+        System.out.println(getClientName(clientHandler.client) + "已经断开连接");
+        close(clientHandler.client);
+    }
+
+    // 广播消息
+    private synchronized void forwardMsg(String msg,ClientHandler source,List<ClientHandler> clientHandlers) {
+        for (ClientHandler clientHandler : clientHandlers) {
+            if (clientHandler.equals(source)) {
+                continue;
+            }
+            ByteBuffer byteBuffer = charSet.encode(getClientName(clientHandler.client) + ":" + msg);
+
+            clientHandler.client.write(byteBuffer,null,clientHandler);
+        }
+    }
+
+    // 接收消息，并解码
+    private String receive(ByteBuffer buffer) {
+        CharBuffer charBuffer = charSet.decode(buffer);
+        return String.valueOf(charBuffer);
+    }
 
     public void start() {
         try {
@@ -52,6 +111,7 @@ public class Server {
             asynchronousChannelGroup = AsynchronousChannelGroup.withThreadPool(executorService);
 
             asynchronousServerSocketChannel = AsynchronousServerSocketChannel.open(asynchronousChannelGroup);
+            asynchronousServerSocketChannel.bind(new InetSocketAddress(DEFAULT_LOCAL_HOST,DEFAULT_PORT));
             AcceptHandler acceptHandler = new AcceptHandler();
             System.out.println("服务器启动成功，监听地址：" + asynchronousServerSocketChannel.getLocalAddress());
             while (true) {
@@ -62,6 +122,7 @@ public class Server {
             e.printStackTrace();
         }
     }
+    // 读取clientChannel的数据到buffer中 交由clientHandler处理
     private class AcceptHandler implements CompletionHandler<AsynchronousSocketChannel,Object> {
 
         @Override
@@ -72,7 +133,7 @@ public class Server {
             if (client != null && client.isOpen()) {
                 ByteBuffer buffer = ByteBuffer.allocate(BUFFER);
                 ClientHandler clientHandler = new ClientHandler(client);
-                clientHandlerList.add(clientHandler);
+                addClient(clientHandler);
                 // 读取客户端发送的数据 到buffer中
                 client.read(buffer,buffer,clientHandler);
             }
@@ -95,11 +156,11 @@ public class Server {
         @Override
         public void completed(Integer result, Object attachment) {
             ByteBuffer buffer = (ByteBuffer) attachment;
-            // 如果是read 那么需要继续从buffer中读取，而如果是write那么直接转发出去就可以了 不再需要buffer
+            // 如果是read 那么需要继续从buffer这个字段，而如果是write那么直接转发出去就可以了 不再需要buffer
             if (attachment != null) {
                 // 当读取到的值小于0 说明客户端发送异常 即可放弃该客户端
                 if (result <= 0 ) {
-                    clientHandlerList.remove(this);
+                    removeClient(this);
                 }else{
                     buffer.flip();
                     // 对buffer中的内容进行解码 发送出去
@@ -109,10 +170,10 @@ public class Server {
                     buffer.clear();
                     if (readyToQuit(fwd)) {
                         clientHandlerList.remove(this);
+                    }else{
+                        client.read(buffer,buffer,this);
                     }
                 }
-            }else{
-                client.read(buffer,buffer,this);
             }
         }
 
@@ -121,47 +182,8 @@ public class Server {
 
         }
 
-        private synchronized void forwardMsg(String msg,ClientHandler source,List<ClientHandler> clientHandlers) {
-            for (ClientHandler clientHandler : clientHandlers) {
-                if (clientHandler.equals(source)) {
-                    continue;
-                }
-                ByteBuffer byteBuffer = charSet.encode(getClientName(clientHandler.client) + msg);
 
-                clientHandler.client.write(byteBuffer,null,clientHandler);
-            }
-        }
 
-        private String receive(ByteBuffer buffer) {
-            CharBuffer charBuffer = charSet.decode(buffer);
-            return String.valueOf(charBuffer);
-        }
-
-        private String getClientName(AsynchronousSocketChannel client) {
-            int clientPort = -1;
-            try {
-                InetSocketAddress inetSocketAddress = (InetSocketAddress) client.getRemoteAddress();
-                clientPort = inetSocketAddress.getPort();
-
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            return "客户端[" + clientPort + "]";
-        }
-    }
-
-    private boolean readyToQuit(String msg) {
-        return QUIT.equals(msg);
-    }
-
-    private void close(Closeable closeable) {
-        if (asynchronousServerSocketChannel != null) {
-            try {
-                asynchronousServerSocketChannel.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
     }
 
     public static void main(String[] args) {
