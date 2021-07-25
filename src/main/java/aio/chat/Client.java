@@ -90,7 +90,7 @@ public class Client {
         if (msg.isEmpty()) {
             return;
         }
-        ByteBuffer buffer = ByteBuffer.allocate(BUFFER);
+        ByteBuffer buffer = charSet.encode(msg);
         Future<Integer> write = clientChannel.write(buffer);
         try{
             write.get();
